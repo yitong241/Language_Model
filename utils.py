@@ -83,7 +83,7 @@ def batchify(data, bsz):
     return data
 
 
-path_data = '../../data/'
+path_data = 'data/'
 _ = check_ptb_dataset_exists(path_data)
 word2idx  =  torch.load(path_data + 'ptb/word2idx.pt')
 idx2word  =  torch.load(path_data + 'ptb/idx2word.pt')
