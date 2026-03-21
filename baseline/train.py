@@ -4,6 +4,7 @@ Sinusoidal PE | Pre-LayerNorm | ReLU MLP | GPT-2 BPE tokenizer
 """
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -30,20 +31,22 @@ from utils import (
 
 CONFIG = {
     "model": "baseline",
-    "bs": 32,
-    "hidden_size": 384,
-    "num_heads": 6,
-    "num_blocks": 6,
+    "bs": 64,
+    "hidden_size": 768,
+    "num_heads": 12,
+    "num_blocks": 12,
     "dropout": 0.1,
-    "seq_length": 512,
-    "tokens_per_epoch": 2_000_000,
-    "num_epochs": 20,
-    "peak_lr": 3e-4,
-    "accumulation_steps": 4,
-    "weight_decay": 0.01,
+    "seq_length": 1024,
+    "tokens_per_epoch": 50_000_000,
+    "num_epochs": 100,              # 100 * 50M = 5B tokens (2x Chinchilla for 125M)
+    "peak_lr": 6e-4,               # GPT-3 Table 2.1
+    "accumulation_steps": 8,        # effective batch = 64 * 1024 * 8 = 524K ≈ GPT-3's 0.5M
+    "weight_decay": 0.1,           # GPT-3 Appendix B
     "grad_clip": 1.0,
-    "warmup_fraction": 0.05,
-    "min_lr_fraction": 0.1,
+    "warmup_fraction": 0.075,      # ~750 steps, matches GPT-3's 375M token warmup
+    "min_lr_fraction": 0.1,        # cosine decay to 10% of peak (GPT-3)
+    "adam_beta1": 0.9,             # GPT-3 Appendix B
+    "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
 }
 
 # ── Model ───────────────────────────────────────────────────────────────────────
@@ -162,6 +165,7 @@ def main(output_dir):
 
     device = torch.device("cuda")
     print(f"Device: {device} ({torch.cuda.get_device_name(0)})")
+    print(f"Config: {json.dumps(CONFIG, indent=2)}")
 
     # ── Tokenizer ───────────────────────────────────────────────────────────
     tokenizer = AutoTokenizer.from_pretrained("gpt2")
@@ -185,6 +189,8 @@ def main(output_dir):
     min_lr_fraction = CONFIG["min_lr_fraction"]
 
     min_lr = peak_lr * min_lr_fraction
+    adam_beta1 = CONFIG["adam_beta1"]
+    adam_beta2 = CONFIG["adam_beta2"]
 
     pos = generate_positional_encoding(seq_length, hidden_size).to(device)
 
@@ -195,7 +201,14 @@ def main(output_dir):
 
     # ── Optimizer / Scheduler ───────────────────────────────────────────────
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(net.parameters(), lr=peak_lr, weight_decay=weight_decay)
+
+    # GPT-3 convention: weight decay on matrices only, not biases/LayerNorm
+    decay_params = [p for p in net.parameters() if p.dim() >= 2]
+    no_decay_params = [p for p in net.parameters() if p.dim() < 2]
+    optimizer = torch.optim.AdamW([
+        {"params": decay_params, "weight_decay": weight_decay},
+        {"params": no_decay_params, "weight_decay": 0.0},
+    ], lr=peak_lr, betas=(adam_beta1, adam_beta2))
 
     total_steps = num_epochs * (tokens_per_epoch // (bs * seq_length)) // accumulation_steps
     warmup_steps = int(total_steps * warmup_fraction)
