@@ -328,13 +328,12 @@ def main(output_dir):
             }, checkpoint_path)
             print(f"  -> saved checkpoint (eval ppl = {math.exp(eval_loss):.2f})")
 
-    # ── Save artifacts ──────────────────────────────────────────────────────
-    peak_mem = torch.cuda.max_memory_allocated() / 1024 ** 3
+        # save artifacts incrementally so they survive SLURM timeouts
+        peak_mem = torch.cuda.max_memory_allocated() / 1024 ** 3
+        save_metrics(output_dir, CONFIG, train_ppls, eval_ppls, tokens_per_sec, peak_mem)
+        save_plots(output_dir, train_ppls, eval_ppls, tokens_per_sec)
+
     print(f"\nTraining complete. Peak GPU memory: {peak_mem:.2f} GB")
-
-    save_metrics(output_dir, CONFIG, train_ppls, eval_ppls, tokens_per_sec, peak_mem)
-    save_plots(output_dir, train_ppls, eval_ppls, tokens_per_sec)
-
     print(f"Best eval ppl: {math.exp(best_loss):.2f} (epoch {eval_ppls.index(min(eval_ppls))})")
 
 
