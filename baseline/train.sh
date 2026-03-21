@@ -49,8 +49,8 @@ fi
 # Set working directory to this ablation's directory
 cd $HOME/Language_Model/baseline
 
-# Run training
-OUTPUT_DIR="runs"
+# Run training — each job gets its own subdirectory
+OUTPUT_DIR="runs/${SLURM_JOB_ID}"
 mkdir -p "$OUTPUT_DIR"
 
 echo "Output directory: $(pwd)/$OUTPUT_DIR"
