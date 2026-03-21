@@ -44,6 +44,8 @@ else
     conda activate transformer_proj
     pip install --upgrade pip
     pip install kagglehub
+    pip install datasets
+    pip install transformers
 fi
 
 # Set working directory to this ablation's directory
