@@ -56,7 +56,7 @@ mkdir -p "$OUTPUT_DIR"
 echo "Output directory: $(pwd)/$OUTPUT_DIR"
 echo "=========================================="
 
-python train.py --output-dir "$OUTPUT_DIR"
+python -u train.py --output-dir "$OUTPUT_DIR"
 
 echo "=========================================="
 echo "End Time: $(date)"
