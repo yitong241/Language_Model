@@ -1,3 +1,8 @@
+####
+# PLEASE try not to edit this file, you might break everyone's dependencies.
+# If you need to abstract out utilities, do so within your own subfolder (baseline/, pos_enc/, activations/, normalization/)
+####
+
 import torch
 import json
 import math
