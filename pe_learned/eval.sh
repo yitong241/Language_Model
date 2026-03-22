@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eval_base
+#SBATCH --job-name=eval_pe_learned
 #SBATCH --partition=gpu --gres=gpu:h100-96:1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -9,7 +9,7 @@
 #SBATCH --output=logs/eval_%j.out
 #SBATCH --error=logs/eval_%j.err
 
-# Usage (run from baseline/):
+# Usage (run from pe_learned/):
 #   sbatch eval.sh runs/<jobid>/best_model.pt
 #   sbatch eval.sh runs/<jobid>/best_model.pt "Your custom prompt here"
 
@@ -31,15 +31,14 @@ conda activate transformer_proj
 
 cd $HOME/Language_Model
 
-# If checkpoint path is relative, prepend baseline/
 if [[ "$CHECKPOINT" != /* ]]; then
-    CHECKPOINT="baseline/$CHECKPOINT"
+    CHECKPOINT="pe_learned/$CHECKPOINT"
 fi
 
 echo "Checkpoint: $CHECKPOINT"
 
 if [ -n "$PROMPT" ]; then
-    python -u eval.py --model-dir baseline --checkpoint "$CHECKPOINT" --prompt "$PROMPT"
+    python -u eval.py --model-dir pe_learned --checkpoint "$CHECKPOINT" --prompt "$PROMPT"
 else
-    python -u eval.py --model-dir baseline --checkpoint "$CHECKPOINT"
+    python -u eval.py --model-dir pe_learned --checkpoint "$CHECKPOINT"
 fi

@@ -1,31 +1,39 @@
 """
-Evaluate a trained baseline model: generate text with various prompts and decoding strategies.
+Shared evaluation script for all ablation experiments.
+Generates text from a trained checkpoint using various decoding strategies.
 
-Usage (via srun on cluster):
-    srun --partition=h100-96 --gres=gpu:1 --mem=32G --time=00:10:00 \
-        python baseline/eval.py --checkpoint baseline/runs/<jobid>/best_model.pt
-
-Usage (local):
-    python baseline/eval.py --checkpoint baseline/runs/<jobid>/best_model.pt
-
-Optional arguments:
-    --prompt "Your custom prompt here"    Generate from a single custom prompt
-    --max-tokens 200                      Max tokens to generate (default: 150)
+Usage:
+    python eval.py --model-dir baseline --checkpoint baseline/runs/<jobid>/best_model.pt
+    python eval.py --model-dir pe_rope --checkpoint pe_rope/runs/<jobid>/best_model.pt
+    python eval.py --model-dir baseline --checkpoint <path> --prompt "Custom prompt"
+    python eval.py --model-dir baseline --checkpoint <path> --max-tokens 200
 """
 
 import argparse
+import importlib.util
+import math
 import os
 import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer
 
-from utils import generate_positional_encoding
-from train import attention_net, CONFIG
+
+def load_model_module(model_dir):
+    """Dynamically import model.py from the given ablation directory."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+    model_path = os.path.join(model_dir, "model.py")
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"No model.py found in {model_dir}")
+
+    spec = importlib.util.spec_from_file_location("model", model_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @torch.no_grad()
@@ -39,7 +47,7 @@ def generate(net, tokenizer, prompt, pos_enc_fn, hidden_size, seq_length,
     for _ in range(max_new_tokens):
         context = token_ids[-seq_length:]
         x = torch.LongTensor(context).unsqueeze(1).to(device)  # (ctx_len, 1)
-        pos_enc = pos_enc_fn(x.size(0), hidden_size).to(device)
+        pos_enc = pos_enc_fn(x.size(0), hidden_size, device)
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
             scores = net(x, pos_enc)       # (ctx_len, 1, vocab_size)
@@ -77,7 +85,13 @@ def generate(net, tokenizer, prompt, pos_enc_fn, hidden_size, seq_length,
     return tokenizer.decode(token_ids)
 
 
-def main(checkpoint_path, custom_prompt=None, max_tokens=150):
+def main(model_dir, checkpoint_path, custom_prompt=None, max_tokens=150):
+    # ── Load model module ────────────────────────────────────────────────────
+    model_module = load_model_module(model_dir)
+    CONFIG = model_module.CONFIG
+    ModelClass = model_module.attention_net
+    get_pos_encoding = model_module.get_pos_encoding
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}" + (f" ({torch.cuda.get_device_name(0)})" if torch.cuda.is_available() else ""))
 
@@ -89,7 +103,7 @@ def main(checkpoint_path, custom_prompt=None, max_tokens=150):
     hidden_size = CONFIG["hidden_size"]
     seq_length = CONFIG["seq_length"]
 
-    net = attention_net(
+    net = ModelClass(
         vocab_size, hidden_size, CONFIG["num_heads"],
         CONFIG["num_blocks"], seq_length, CONFIG["dropout"],
     )
@@ -101,13 +115,14 @@ def main(checkpoint_path, custom_prompt=None, max_tokens=150):
 
     epoch = checkpoint.get('epoch', '?')
     eval_loss = checkpoint.get('eval_loss', None)
-    eval_ppl = f"{__import__('math').exp(eval_loss):.2f}" if eval_loss else "?"
+    eval_ppl = f"{math.exp(eval_loss):.2f}" if eval_loss else "?"
+    print(f"Model: {CONFIG['model']}")
     print(f"Loaded checkpoint: epoch {epoch}, eval ppl {eval_ppl}")
     print(f"Parameters: {sum(p.numel() for p in net.parameters()):,}")
 
     # ── Generation helper ────────────────────────────────────────────────────
     def gen(prompt, **kwargs):
-        return generate(net, tokenizer, prompt, generate_positional_encoding,
+        return generate(net, tokenizer, prompt, get_pos_encoding,
                         hidden_size, seq_length, eos_token_id, device,
                         max_new_tokens=max_tokens, **kwargs)
 
@@ -126,20 +141,13 @@ def main(checkpoint_path, custom_prompt=None, max_tokens=150):
 
     # ── Default prompts ──────────────────────────────────────────────────────
     prompts = [
-        # Factual / knowledge
         "The capital of France is",
         "Water freezes at a temperature of",
         "The theory of evolution was proposed by",
-
-        # Pattern completion
         "1, 2, 3, 4, 5,",
         "Monday, Tuesday, Wednesday,",
-
-        # Educational (FineWeb-Edu domain)
         "Photosynthesis is the process by which",
         "The three branches of the United States government are",
-
-        # Creative / open-ended
         "Once upon a time, in a land far away,",
         "The most important lesson I learned was",
     ]
@@ -161,7 +169,9 @@ def main(checkpoint_path, custom_prompt=None, max_tokens=150):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate trained baseline model")
+    parser = argparse.ArgumentParser(description="Evaluate trained transformer model")
+    parser.add_argument("--model-dir", type=str, required=True,
+                        help="Ablation directory containing model.py (e.g., 'baseline', 'pe_rope')")
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to best_model.pt checkpoint")
     parser.add_argument("--prompt", type=str, default=None,
@@ -169,4 +179,4 @@ if __name__ == "__main__":
     parser.add_argument("--max-tokens", type=int, default=150,
                         help="Maximum tokens to generate (default: 150)")
     args = parser.parse_args()
-    main(args.checkpoint, custom_prompt=args.prompt, max_tokens=args.max_tokens)
+    main(args.model_dir, args.checkpoint, custom_prompt=args.prompt, max_tokens=args.max_tokens)

@@ -1,20 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=base
+#SBATCH --job-name=norm_rmsnorm
 #SBATCH --partition=gpu --gres=gpu:h100-96:1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=20:00:00
-#SBATCH --output=logs/base_%j.out
-#SBATCH --error=logs/base_%j.err
+#SBATCH --output=logs/norm_rmsnorm_%j.out
+#SBATCH --error=logs/norm_rmsnorm_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=user@comp.nus.edu.sg
 
-# Create logs directory if it doesn't exist
 mkdir -p logs
 
-# Print job information
 echo "=========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Job Name: $SLURM_JOB_NAME"
@@ -24,7 +22,6 @@ echo "GPU Information:"
 nvidia-smi
 echo "=========================================="
 
-# Initialize conda for bash shell if not already done
 if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
     source "$HOME/miniconda3/etc/profile.d/conda.sh"
 elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
@@ -34,7 +31,6 @@ else
     exit 1
 fi
 
-# Check if environment exists
 if conda env list | grep -q "^transformer_proj"; then
     echo "Conda environment 'transformer_proj' already exists. Activating it..."
     conda activate transformer_proj
@@ -48,17 +44,15 @@ else
     pip install transformers
 fi
 
-# Set working directory to project root
 cd $HOME/Language_Model
 
-# Run training — each job gets its own subdirectory
-OUTPUT_DIR="baseline/runs/${SLURM_JOB_ID}"
+OUTPUT_DIR="norm_rmsnorm/runs/${SLURM_JOB_ID}"
 mkdir -p "$OUTPUT_DIR"
 
 echo "Output directory: $(pwd)/$OUTPUT_DIR"
 echo "=========================================="
 
-python -u train.py --model-dir baseline --output-dir "$OUTPUT_DIR"
+python -u train.py --model-dir norm_rmsnorm --output-dir "$OUTPUT_DIR"
 
 echo "=========================================="
 echo "End Time: $(date)"
