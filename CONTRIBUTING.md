@@ -174,9 +174,9 @@ Output goes to `logs/eval_<jobid>.out`.
 
 ## Quick Start: Creating Your Ablation
 
-1. Your directory already exists with a copy of `baseline/model.py`
+1. Your directory already exists with a copy of `model.py`
 2. Edit `model.py` to implement your ablation
-3. Test locally if possible: `python train.py --model-dir your_ablation --output-dir /tmp/test`
+3. Test locally if possible: `python train.py --model-dir your_ablation --output-dir /tmp/test`, but this is a 125M param model. Unlikely you can test locally.
 4. Submit: `cd your_ablation && sbatch train.sh`
 5. Check results: `cat logs/your_ablation_<jobid>.out`
 
