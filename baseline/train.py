@@ -38,7 +38,7 @@ CONFIG = {
     "dropout": 0.1,
     "seq_length": 1024,
     "tokens_per_epoch": 50_000_000,
-    "num_epochs": 100,              # 100 * 50M = 5B tokens (2x Chinchilla for 125M)
+    "num_epochs": 100,              # 100 * 50M = 5B tokens (2x Chinchilla optimal for 125M)
     "peak_lr": 6e-4,               # GPT-3 Table 2.1
     "accumulation_steps": 8,        # effective batch = 64 * 1024 * 8 = 524K ≈ GPT-3's 0.5M
     "weight_decay": 0.1,           # GPT-3 Appendix B
