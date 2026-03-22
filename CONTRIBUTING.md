@@ -36,6 +36,19 @@ Each ablation directory has the same layout: `model.py`, `train.sh`.
 - **`train.py`** — shared training loop. If you find a bug, discuss with the team first.
 - **Other people's directories** — each person works only in their own ablation folder.
 
+## Baseline Model
+
+All ablations compare against the baseline (sinusoidal PE, pre-LayerNorm, ReLU). The trained baseline checkpoint is shared via Google Drive so everyone has the same reference point. We cant track the trained baseline with git because the weights file is way too big for GitHub.
+
+**Google Drive folder:** [HERE](https://drive.google.com/drive/folders/1vS5C_1KBZ4y2-Cwzf6ELG84r3wbCkH0Z?usp=sharing)
+
+**To set up the baseline checkpoint on your cluster:**
+
+1. Download `baseline.pt` from the Google Drive folder
+2. Place it in `baseline/runs/<jobid>/` alongside the other artifacts (which are tracked by git):
+
+You need the baseline checkpoint to run comparison analyses (e.g., plotting baseline loss curves alongside your variant, or computing baseline perplexity at different sequence lengths).
+
 ## Interface Contract
 
 Your `model.py` must export exactly three things. The shared `train.py` imports them dynamically at runtime:
@@ -153,7 +166,7 @@ After training (or even during — artifacts are saved incrementally each epoch)
 
 | File | Contents |
 |------|----------|
-| `best_model.pt` | Best checkpoint (lowest eval perplexity). Contains `model_state_dict`, `optimizer_state_dict`, `epoch`, `eval_loss`. |
+| `<model_name>.pt` | Best checkpoint (e.g., `baseline.pt`, `pe_rope.pt`). Named after `CONFIG["model"]`. Contains `model_state_dict`, `optimizer_state_dict`, `epoch`, `eval_loss`. |
 | `metrics.json` | Full training history: per-epoch `train_ppls`, `eval_ppls`, `tokens_per_sec`, plus `config`, `best_eval_ppl`, `best_epoch`, `peak_memory_gb`. |
 | `curves.png` | 3-panel plot: perplexity, log loss, throughput over epochs. |
 
@@ -161,7 +174,7 @@ Artifacts survive SLURM timeouts — they are saved after every epoch, not just 
 
 ### Step 5: Collect Analysis Metrics
 
-After training, you must collect ablation-specific metrics for the final report. These require custom evaluation scripts that you write and run against your `best_model.pt`. See the next section for what to measure.
+After training, you must collect ablation-specific metrics for the final report. These require custom evaluation scripts that you write and run against your checkpoint. See the next section for what to measure.
 
 ## Analysis Requirements by Ablation Category
 

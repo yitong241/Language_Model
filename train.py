@@ -146,7 +146,7 @@ def main(model_dir, output_dir):
     eval_ppls = []
     tokens_per_sec = []
 
-    checkpoint_path = os.path.join(output_dir, "best_model.pt")
+    checkpoint_path = os.path.join(output_dir, f"{CONFIG['model']}.pt")
     best_loss = float('inf')
     prev_elapsed = 0
 
