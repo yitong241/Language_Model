@@ -1,191 +1,236 @@
 # Contributing: Ablation Experiments
 
+## Overview
+
+This project trains a GPT-3 Small (125M parameter) decoder-only transformer on FineWeb-Edu and runs ablation studies on individual architectural components. Each teammate owns one ablation variant, modifying only the model architecture while the training infrastructure stays identical across all experiments.
+
+All hyperparameters are anchored to the GPT-3 paper (Brown et al., 2020): d_model=768, 12 heads, 12 layers, batch size ~0.5M tokens, cosine LR schedule with warmup, AdamW with weight decay on matrices only.
+
 ## Project Structure
 
 ```
 Language_Model/
-  utils.py              # Shared data pipeline, metrics, plotting — DO NOT EDIT
-  train.py              # Shared training script — DO NOT EDIT
-  eval.py               # Shared evaluation/generation script — DO NOT EDIT
-  baseline/             # Baseline model (reference implementation)
-    model.py            # Model architecture + config
-    train.sh            # SLURM training job
-    eval.sh             # SLURM evaluation job
-    runs/<jobid>/       # Output artifacts (auto-created per job)
-  pe_learned/           # Ablation: learned positional encoding
-  pe_rope/              # Ablation: RoPE positional encoding
-  pe_alibi/             # Ablation: ALiBi positional encoding
-  act_gelu/             # Ablation: GELU activation
-  act_swiglu/           # Ablation: SwiGLU activation
-  norm_rmsnorm/         # Ablation: RMSNorm (pre-norm)
-  norm_postln/          # Ablation: Post-LayerNorm
+  utils.py                # Shared data pipeline, metrics, plotting
+  train.py                # Shared training script (dynamic model loading)
+  CONTRIBUTING.md         # This file
+
+  baseline/               # Reference: Sinusoidal PE, Pre-LN, ReLU
+    model.py              # Model architecture + CONFIG
+    train.sh              # SLURM training job
+    runs/<jobid>/         # Output artifacts (auto-created)
+
+  pe_learned/             # Ablation: learned positional embeddings
+  pe_rope/                # Ablation: RoPE positional encoding
+  pe_alibi/               # Ablation: ALiBi positional encoding
+  act_gelu/               # Ablation: GELU activation
+  act_swiglu/             # Ablation: SwiGLU activation
+  norm_rmsnorm/           # Ablation: RMSNorm (pre-norm position)
+  norm_postln/            # Ablation: Post-LayerNorm
 ```
 
-Each ablation directory has the same structure: `model.py`, `train.sh`, `eval.sh`, and a `runs/` folder for artifacts.
+Each ablation directory has the same layout: `model.py`, `train.sh`.
 
-## How It Works
+## Do Not Edit
 
-The shared `train.py` dynamically loads your `model.py` at runtime:
+- **`utils.py`** — shared data pipeline and utilities. Editing this breaks everyone's runs.
+- **`train.py`** — shared training loop. If you find a bug, discuss with the team first.
+- **Other people's directories** — each person works only in their own ablation folder.
+
+## Interface Contract
+
+Your `model.py` must export exactly three things. The shared `train.py` imports them dynamically at runtime:
 
 ```
 train.py --model-dir <your_ablation>
-    └── imports <your_ablation>/model.py
-        ├── CONFIG        (hyperparameters)
-        ├── attention_net  (model class)
-        └── get_pos_encoding (positional encoding function)
+    imports <your_ablation>/model.py
+        CONFIG            dict of hyperparameters
+        attention_net     model class (nn.Module)
+        get_pos_encoding  function returning positional encoding
 ```
-
-This guarantees that the training loop, optimizer, data pipeline, and evaluation are **identical** across all ablation runs. The only thing that differs is the model architecture.
-
-## What You Edit
-
-**Your `model.py`** — this is the only file you need to modify. It must export three things:
 
 ### 1. `CONFIG` (dict)
 
-All hyperparameters for your run. Must include these keys:
+Must include all of these keys:
 
 ```python
 CONFIG = {
-    "model": "your_ablation_name",   # identifies this run in artifacts
+    "model": "your_ablation_name",   # identifies this variant in artifacts
     "bs": 64,                        # batch size per forward pass
-    "hidden_size": 768,              # model dimension (d_model)
-    "num_heads": 12,                 # number of attention heads
-    "num_blocks": 12,                # number of transformer blocks
+    "hidden_size": 768,              # d_model
+    "num_heads": 12,
+    "num_blocks": 12,
     "dropout": 0.1,
-    "seq_length": 1024,              # context window
-    "tokens_per_epoch": 50_000_000,  # tokens streamed per epoch
-    "num_epochs": 85,                # total epochs
-    "peak_lr": 6e-4,                 # peak learning rate
-    "accumulation_steps": 8,         # gradient accumulation steps
+    "seq_length": 1024,
+    "tokens_per_epoch": 50_000_000,
+    "num_epochs": 100,                # 100 * 50M = 5B tokens
+    "peak_lr": 6e-4,
+    "accumulation_steps": 8,         # effective batch = 64 * 1024 * 8 = 524K tokens
     "weight_decay": 0.1,
     "grad_clip": 1.0,
-    "warmup_fraction": 0.075,        # fraction of total steps for LR warmup
-    "min_lr_fraction": 0.1,          # min LR as fraction of peak
+    "warmup_fraction": 0.075,
+    "min_lr_fraction": 0.1,          # cosine decay to 10% of peak LR
     "adam_beta1": 0.9,
     "adam_beta2": 0.95,
 }
 ```
 
-You can change values (e.g., adjust `num_epochs` if your ablation needs more/fewer) and add new keys for your own use, but **do not remove or rename existing keys**.
+You may change values if your ablation requires it (e.g., different `num_epochs`) and add new keys for your own use, but **do not remove or rename existing keys**.
 
 ### 2. `attention_net` (class)
 
-The top-level model class. Must follow this interface:
+Top-level model class. Must match this interface exactly:
 
 ```python
 class attention_net(nn.Module):
     def __init__(self, vocab_size, d, num_heads, num_blocks, seq_length, dropout):
-        # Build your model here
         ...
 
     def forward(self, word_seq, pos):
         # word_seq: (seq_length, batch_size) — token IDs
-        # pos: output of get_pos_encoding() — tensor or None
+        # pos: output of get_pos_encoding(), tensor or None
         # Returns: (seq_length, batch_size, vocab_size) — logits
         ...
 ```
 
-**Do not change the constructor or forward signatures.** The shared training script calls these with exactly these arguments.
-
-Inside the class, you can do whatever you want — change attention mechanisms, normalization, activation functions, weight initialization, etc.
+Do not change constructor or forward signatures. Inside the class, implement whatever architecture you need.
 
 ### 3. `get_pos_encoding` (function)
 
-Controls how positional information is provided to the model:
-
 ```python
 def get_pos_encoding(seq_length, hidden_size, device):
-    """Return positional encoding for this model variant.
-
-    Returns:
-        torch.Tensor or None — passed as `pos` to attention_net.forward()
-    """
+    # Returns: torch.Tensor or None
+    # The return value is passed as `pos` to attention_net.forward()
     ...
 ```
 
-**Examples by ablation type:**
+Examples:
 
 ```python
-# Baseline / learned PE — return a tensor
+# Sinusoidal (baseline) — returns a tensor
 def get_pos_encoding(seq_length, hidden_size, device):
     return generate_positional_encoding(seq_length, hidden_size).to(device)
 
-# RoPE — return precomputed frequency tensors, or None
+# RoPE — return precomputed frequencies
 def get_pos_encoding(seq_length, hidden_size, device):
     return precompute_rope_frequencies(seq_length, hidden_size).to(device)
 
-# ALiBi — return None (bias computed inside attention)
+# ALiBi — return None (bias is computed inside attention)
 def get_pos_encoding(seq_length, hidden_size, device):
     return None
 ```
 
-The return value is passed directly as the `pos` argument to `attention_net.forward()`. Your model decides how to use it (or ignore it).
+## Workflow
 
-## How to Submit Jobs
+### Step 1: Implement Your Ablation
 
-### Training
+Edit `model.py` in your ablation directory. Start from the baseline copy already there and modify the relevant component. Use `baseline/model.py` as your reference implementation.
 
-From your ablation directory:
+### Step 2: Train
 
 ```bash
-cd ~/Language_Model/pe_rope
+cd ~/Language_Model/<your_ablation>
 sbatch train.sh
 ```
 
-This creates `runs/<jobid>/` containing:
-- `best_model.pt` — best checkpoint (by eval perplexity)
-- `metrics.json` — per-epoch train/eval PPL, throughput, config
-- `curves.png` — training curves plot
+This submits a SLURM job on H100-96 GPUs. Training takes approximately 12 hours for 100 epochs.
 
-Artifacts are saved incrementally after each epoch, so they survive SLURM timeouts.
-
-### Monitoring
+### Step 3: Monitor
 
 ```bash
 # Check job status
 squeue -u $USER
 
-# Watch training progress
+# Watch training progress (logs appear in your ablation directory)
 tail -f logs/<job_name>_<jobid>.out
 
 # Check for errors
 tail -f logs/<job_name>_<jobid>.err
 ```
 
-### Evaluation (text generation)
+### Step 4: Check Training Artifacts
 
-From your ablation directory:
+After training (or even during — artifacts are saved incrementally each epoch), your `runs/<jobid>/` directory contains:
 
-```bash
-cd ~/Language_Model/pe_rope
-sbatch eval.sh runs/<jobid>/best_model.pt
-sbatch eval.sh runs/<jobid>/best_model.pt "Custom prompt here"
-```
+| File | Contents |
+|------|----------|
+| `best_model.pt` | Best checkpoint (lowest eval perplexity). Contains `model_state_dict`, `optimizer_state_dict`, `epoch`, `eval_loss`. |
+| `metrics.json` | Full training history: per-epoch `train_ppls`, `eval_ppls`, `tokens_per_sec`, plus `config`, `best_eval_ppl`, `best_epoch`, `peak_memory_gb`. |
+| `curves.png` | 3-panel plot: perplexity, log loss, throughput over epochs. |
 
-Output goes to `logs/eval_<jobid>.out`.
+Artifacts survive SLURM timeouts — they are saved after every epoch, not just at the end.
 
-## What NOT to Edit
+### Step 5: Collect Analysis Metrics
 
-- **`utils.py`** — shared data pipeline and utilities. Editing this breaks everyone's runs.
-- **`train.py`** (root) — shared training loop. If you find a bug, discuss with the team first.
-- **`eval.py`** (root) — shared evaluation script.
-- **Other people's directories** — each person works only in their own ablation folder.
+After training, you must collect ablation-specific metrics for the final report. These require custom evaluation scripts that you write and run against your `best_model.pt`. See the next section for what to measure.
 
-## Quick Start: Creating Your Ablation
+## Analysis Requirements by Ablation Category
 
-1. Your directory already exists with a copy of `model.py`
-2. Edit `model.py` to implement your ablation
-3. Test locally if possible: `python train.py --model-dir your_ablation --output-dir /tmp/test`, but this is a 125M param model. Unlikely you can test locally.
-4. Submit: `cd your_ablation && sbatch train.sh`
-5. Check results: `cat logs/your_ablation_<jobid>.out`
+### Positional Encoding (baseline, pe_learned, pe_rope, pe_alibi)
 
-## Output Artifacts
+**1. Length Generalization**
 
-After training, `runs/<jobid>/` contains:
+Train on `seq_length=1024`. Evaluate perplexity at sequence lengths: 1024, 1536, 2048, 3072, 4096. Plot eval perplexity vs. sequence length with one line per variant.
 
-| File | Description |
-|------|-------------|
-| `best_model.pt` | Best checkpoint (lowest eval PPL). Contains `model_state_dict`, `optimizer_state_dict`, `epoch`, `eval_loss`. |
-| `metrics.json` | Full training history: per-epoch `train_ppls`, `eval_ppls`, `tokens_per_sec`, `peak_memory_gb`, `config`, `best_eval_ppl`, `best_epoch`. |
-| `curves.png` | 3-panel plot: Perplexity, Log Loss, Throughput over epochs. |
+- Sinusoidal: expect noticeable degradation beyond training length
+- RoPE: expect moderate degradation
+- ALiBi: expect minimal degradation (designed for length extrapolation)
+- Learned: **cannot extrapolate** — the embedding table has exactly 1024 entries, so evaluation beyond training length is impossible. Note this in the report; no data needed.
+
+The model architecture is length-agnostic (no hardcoded sequence length in attention or FFN layers). To evaluate at longer lengths, load the checkpoint and call `get_pos_encoding` with the desired length. Reduce eval batch size if needed to fit in GPU memory at longer sequences.
+
+**2. Per-Position Loss Curve**
+
+During evaluation on `seq_length=1024`, compute cross-entropy loss at each token position separately (position 0 through 1023). Plot loss vs. position.
+
+Early positions should have higher loss (less context). The comparison of interest is how each PE handles late positions — ALiBi's recency bias and RoPE's rotational decay create different long-range attention patterns.
+
+The model's forward pass returns `(seq_length, batch_size, vocab_size)`, so per-position loss can be computed directly from the output without any model changes.
+
+**3. Attention Pattern Heatmaps**
+
+For a small eval batch, extract attention weights from each layer and head. Visualize as heatmaps (layer x head grid).
+
+`F.scaled_dot_product_attention` (used in the baseline) does not return attention weights. To extract them, manually compute `softmax(QK^T / sqrt(d_head) + mask)` by hooking into or bypassing the attention module. For ALiBi, include the bias term in the pre-softmax scores.
+
+Expected patterns:
+- Sinusoidal/Learned: relatively uniform attention
+- RoPE: heads specializing in local vs. global attention
+- ALiBi: visible diagonal recency band, width varying by head
+
+### Activation Function (baseline, act_gelu, act_swiglu)
+
+**1. Dead Neuron Count**
+
+After training, pass ~100 eval batches through the model. For each FFN hidden unit, record whether it ever produced a non-zero output (after the activation, before the down-projection). Report dead neuron percentage per layer.
+
+Expected:
+- ReLU (baseline): highest dead neuron count — units stuck in negative regime never recover
+- GELU: near-zero dead neurons (output is never exactly zero)
+- SwiGLU: distinguish between "dead" (gate always near 0) and "selective" (gate active for some inputs)
+
+Plot dead neuron % vs. layer depth. Deeper layers tend to have more dead neurons with ReLU.
+
+**2. Activation Distribution Histograms**
+
+For each variant, collect FFN hidden activations (after the nonlinearity, before the down-projection) across eval batches. Plot the distribution on a log scale.
+
+Expected:
+- ReLU: spike at exactly zero plus a positive tail
+- GELU: smooth distribution with a slight negative tail
+- SwiGLU: the gate-value product creates a distinct distribution — look for sparsity patterns (many values near zero, some large activations)
+
+### Normalization (baseline, norm_rmsnorm, norm_postln)
+
+**1. Training Stability / Loss Curve Comparison**
+
+No custom analysis script needed. After all three variants are trained, plot their loss curves from `metrics.json` on the same axes. This is the primary metric for normalization ablations.
+
+Expected: Post-LN may show loss spikes, slower convergence, or outright divergence compared to Pre-LN and RMSNorm. If it diverges, that is itself a finding worth reporting — include the diverging curve alongside the stable ones.
+
+## Tips
+
+- Read `baseline/model.py` thoroughly before starting. Understand the full architecture before modifying a component.
+- Run a short test first if you can: `python train.py --model-dir <your_ablation> --output-dir /tmp/test` — but this is a 125M param model, so local testing may not be feasible.
+- If your training run gets killed by SLURM timeout, your artifacts up to the last completed epoch are preserved. Check `metrics.json` to see how far you got, then decide whether to re-run with fewer epochs.
+- The GPT-2 BPE tokenizer (`vocab_size=50257`) is shared across all variants via `AutoTokenizer.from_pretrained("gpt2")`. Do not change the tokenizer.
+- Training data is streamed from HuggingFace (FineWeb-Edu). No local data files needed.
