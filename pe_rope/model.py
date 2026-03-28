@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 
+'''
 CONFIG = {
     "model": "pe_rope",
     "bs": 64,
@@ -33,7 +34,7 @@ CONFIG = {
     "adam_beta1": 0.9,             # GPT-3 Appendix B
     "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
 }
-
+'''
 '''
 # Debug config
 CONFIG = {
@@ -56,6 +57,25 @@ CONFIG = {
     "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
 }
 '''
+CONFIG = {
+    "model": "pe_rope",
+    "bs": 32,
+    "hidden_size": 512,
+    "num_heads": 8,
+    "num_blocks": 8,
+    "dropout": 0.1,
+    "seq_length": 512,
+    "tokens_per_epoch": 2_500_500,
+    "num_epochs": 15,               # 15 * 5M = 75M tokens
+    "peak_lr": 6e-4,
+    "accumulation_steps": 4,        # effective batch = 32 * 512 * 4 = 65K tokens
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "warmup_fraction": 0.075,
+    "min_lr_fraction": 0.1,
+    "adam_beta1": 0.9,
+    "adam_beta2": 0.95,
+}
 
 # ── Positional encoding ─────────────────────────────────────────────────────────
 
@@ -133,25 +153,19 @@ class MultipleAttentionHead(nn.Module):
         V = self.WV(H).reshape(batch, seq_len, self.num_heads, self.d_head).transpose(1, 2)
         attn_out = F.scaled_dot_product_attention(
             Q_rope, K_rope, V, is_causal=True,
+            
             dropout_p=self.dropout_p if self.training else 0.0,
         )
         attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, self.d_head * self.num_heads)
 
         ###### Analysis Code #####
         if self.capture_attn:
-            attn_score = Q @ K.transpose(-2, -1) * self.d_head**-0.5 # [Batch size, Num Heads, seq_len, seq_len]
-            seq_len = Q.shape[2]
+            attn_score = Q_rope @ K_rope.transpose(-2, -1) * self.d_head**-0.5 # [Batch size, Num Heads, seq_len, seq_len]
+            seq_len = Q_rope.shape[2]
             mask = torch.tril(torch.ones(seq_len, seq_len)).long().to(attn_score.device)
             attn_score = attn_score.masked_fill(mask==0, value=float('-inf'))
             attn_score = torch.softmax(attn_score, dim=-1)
             self.attn_weights = attn_score
-        # Ignore this, cuz the results are apparently different from the one computed by
-        # scaled_dot_product_attention. 
-        # Claude said its due to minor floating point differences due to Flash Attention,
-        # but probably isn't wrong
-        # For reference here is an example of the difference in weights:
-        # [0.0977, -0.0515, -0.9375, -0.2256, -0.5078] <= own implementation
-        # [0.1084, -0.0571, -1.0391, -0.2500, -0.5625] <= scaled_dot_pdt_attn
         # attn_out = attn_score @ V
         #####
 
