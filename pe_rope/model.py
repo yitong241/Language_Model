@@ -11,7 +11,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import generate_positional_encoding
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 
@@ -35,13 +34,69 @@ CONFIG = {
     "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
 }
 
+'''
+# Debug config
+CONFIG = {
+    "model": "pe_rope",
+    "bs": 64,
+    "hidden_size": 384,
+    "num_heads": 6,
+    "num_blocks": 6,
+    "dropout": 0.1,
+    "seq_length": 256,
+    "tokens_per_epoch": 500_000,
+    "num_epochs": 2,              # 85 * 50M = 4.25B tokens (~1.7x Chinchilla optimal for 125M)
+    "peak_lr": 6e-4,               # GPT-3 Table 2.1
+    "accumulation_steps": 8,        # effective batch = 64 * 1024 * 8 = 524K ≈ GPT-3's 0.5M
+    "weight_decay": 0.1,           # GPT-3 Appendix B
+    "grad_clip": 1.0,
+    "warmup_fraction": 0.075,      # ~750 steps, matches GPT-3's 375M token warmup
+    "min_lr_fraction": 0.1,        # cosine decay to 10% of peak (GPT-3)
+    "adam_beta1": 0.9,             # GPT-3 Appendix B
+    "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
+}
+'''
+
 # ── Positional encoding ─────────────────────────────────────────────────────────
 
 def get_pos_encoding(seq_length, hidden_size, device):
-    """Return positional encoding tensor for this model variant.
-    Baseline uses sinusoidal PE. Override in ablation model.py for RoPE/ALiBi/etc.
     """
-    return generate_positional_encoding(seq_length, hidden_size).to(device)
+    RoPE rotates Q and K inside attention rather than adding a fixed offset
+    to token embeddings. Typical return: (cos, sin) each of shape
+    (seq_length, d_head), precomputed on `device`.
+    """
+    assert hidden_size == 2 * (hidden_size // 2)  # check if dim is divisible by 2
+    d_head = hidden_size // CONFIG['num_heads']
+    return precompute_rope_freqs(seq_length, d_head, device)
+
+def precompute_rope_freqs(seq_length, d_head, device, base=10000):
+    # Calculate rotation angle for each index
+    # aka computes cos(mθ) and sin(mθ)
+    theta = 1.0 / (base ** (torch.arange(0, d_head, 2, device=device) / d_head))
+    theta = theta.repeat(2)
+    pos = torch.arange(0, seq_length, device=device).unsqueeze(1)
+    m_theta = pos * theta 
+
+    return m_theta.cos(), m_theta.sin()
+
+def rotate_half(x):
+    # Turns [x1, x2, x3, x4]
+    # into [-x3, -x4, x1, x2]
+    # aka computes q[idx]
+    half = x.shape[-1] // 2
+    x1, x2 = x[..., :half], x[..., half:]
+    return torch.cat([-x2, x1], dim=-1)
+
+def apply_rotary_embeddings(q_or_k, cos_freqs, sin_freqs):
+    # Uses the modern RoPE pairing: (q_0, q_d/2), (q_1, q_d/2 + 1)...
+    # q_rot[0] =  q[0]·cos(mθ₀) - q[2]·sin(mθ₀)
+    # q_rot[1] =  q[1]·cos(mθ₁) + q[3]·sin(mθ₁)
+    # q_rot[2] =  q[2]·cos(mθ₀) - q[0]·sin(mθ₀)
+    # q_rot[3] =  q[3]·cos(mθ₁) + q[1]·sin(mθ₁)
+    # Does this thing above ^, where m is the sequence index, q is the query or key
+    # Note: Its different from the RoPE paper which is (q_0, q_1), (q2, q3) etc, but its just a performance
+    # thing, the result is still same
+    return q_or_k * cos_freqs + rotate_half(q_or_k) * sin_freqs
 
 # ── Model ───────────────────────────────────────────────────────────────────────
 
@@ -58,23 +113,49 @@ class MultipleAttentionHead(nn.Module):
         self.num_heads = num_heads
         self.d_head = d_head
 
-    def forward(self, H):
+        ############ For analysis only
+        self.capture_attn = False
+        self.attn_weights = None
+        #############
+
+    def forward(self, H, pos_enc):
+        # (RoPE): add `pos` argument (the (cos, sin) tuple from get_pos_encoding)
         batch, seq_len, _ = H.shape
-        Q = self.WQ(H).reshape(batch, seq_len, self.num_heads, self.d_head)
-        K = self.WK(H).reshape(batch, seq_len, self.num_heads, self.d_head)
-        V = self.WV(H).reshape(batch, seq_len, self.num_heads, self.d_head)
-        Q = Q.transpose(1, 2)
-        K = K.transpose(1, 2)
-        V = V.transpose(1, 2)
+
+        pos_enc_cos, pos_enc_sin = pos_enc
+
+        Q = self.WQ(H).reshape(batch, seq_len, self.num_heads, self.d_head).transpose(1, 2)
+        Q_rope = apply_rotary_embeddings(Q, pos_enc_cos, pos_enc_sin)
+
+        K = self.WK(H).reshape(batch, seq_len, self.num_heads, self.d_head).transpose(1, 2)
+        K_rope = apply_rotary_embeddings(K, pos_enc_cos, pos_enc_sin)
+
+        V = self.WV(H).reshape(batch, seq_len, self.num_heads, self.d_head).transpose(1, 2)
         attn_out = F.scaled_dot_product_attention(
-            Q, K, V, is_causal=True,
+            Q_rope, K_rope, V, is_causal=True,
             dropout_p=self.dropout_p if self.training else 0.0,
         )
-        attn_out = attn_out.transpose(1, 2)
-        attn_out = attn_out.reshape(batch, seq_len, self.d_head * self.num_heads)
-        H = self.WO(attn_out)
-        return H
+        attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, self.d_head * self.num_heads)
 
+        ###### Analysis Code #####
+        if self.capture_attn:
+            attn_score = Q @ K.transpose(-2, -1) * self.d_head**-0.5 # [Batch size, Num Heads, seq_len, seq_len]
+            seq_len = Q.shape[2]
+            mask = torch.tril(torch.ones(seq_len, seq_len)).long().to(attn_score.device)
+            attn_score = attn_score.masked_fill(mask==0, value=float('-inf'))
+            attn_score = torch.softmax(attn_score, dim=-1)
+            self.attn_weights = attn_score
+        # Ignore this, cuz the results are apparently different from the one computed by
+        # scaled_dot_product_attention. 
+        # Claude said its due to minor floating point differences due to Flash Attention,
+        # but probably isn't wrong
+        # For reference here is an example of the difference in weights:
+        # [0.0977, -0.0515, -0.9375, -0.2256, -0.5078] <= own implementation
+        # [0.1084, -0.0571, -1.0391, -0.2500, -0.5625] <= scaled_dot_pdt_attn
+        # attn_out = attn_score @ V
+        #####
+
+        return self.WO(attn_out)
 
 class TransformerBlock(nn.Module):
     def __init__(self, d, num_heads, dropout):
@@ -86,10 +167,11 @@ class TransformerBlock(nn.Module):
             nn.Linear(d, 4 * d), nn.ReLU(), nn.Dropout(dropout), nn.Linear(4 * d, d),
         )
         self.drop_attn = nn.Dropout(dropout)
-        self.drop_mlp = nn.Dropout(dropout)
+        self.drop_mlp  = nn.Dropout(dropout)
 
-    def forward(self, H):
-        H = H + self.drop_attn(self.MHA(self.LN_MHA(H)))
+    def forward(self, H, pos_enc):
+        # add `pos` argument and forward it: self.MHA(self.LN_MHA(H), pos)
+        H = H + self.drop_attn(self.MHA(self.LN_MHA(H), pos_enc))
         H = H + self.drop_mlp(self.MLP(self.LN_MLP(H)))
         return H
 
@@ -104,14 +186,11 @@ class Transformer_decoder(nn.Module):
 
     def forward(self, batch_seq, pos_enc):
         H = batch_seq.transpose(1, 0)
-        pos_enc = pos_enc.unsqueeze(dim=0)
-        H = H + pos_enc
+        # Pass pos_enc into each block instead: H = TR_Block(H, pos_enc)
         for TR_Block in self.TR_Blocks:
-            H = TR_Block(H)
+            H = TR_Block(H, pos_enc)
         H = self.final_norm(H)
-        H = H.permute(1, 0, 2)
-        return H
-
+        return H.permute(1, 0, 2)
 
 class ANN(nn.Module):
     def __init__(self, d, num_heads, num_blocks, seq_length, dropout):
@@ -147,7 +226,7 @@ class attention_net(nn.Module):
             nn.init.normal_(block.MLP[3].weight, mean=0, std=residual_std)
 
     def forward(self, word_seq, pos):
-        g_seq = self.layer1(word_seq)
-        h_seq = self.layer2(g_seq, pos)
+        g_seq     = self.layer1(word_seq)
+        h_seq     = self.layer2(g_seq, pos)
         score_seq = self.layer3(h_seq)
         return score_seq
