@@ -6,8 +6,8 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=20:00:00
-#SBATCH --output=logs/act_gelu_%j.out
-#SBATCH --error=logs/act_gelu_%j.err
+#SBATCH --output=logs/norm_post_ln_%j.out
+#SBATCH --error=logs/norm_post_ln_%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=user@comp.nus.edu.sg
 
@@ -46,13 +46,13 @@ fi
 
 cd $HOME/Language_Model
 
-OUTPUT_DIR="act_gelu/runs/${SLURM_JOB_ID}"
+OUTPUT_DIR="norm_post_ln/runs/${SLURM_JOB_ID}"
 mkdir -p "$OUTPUT_DIR"
 
 echo "Output directory: $(pwd)/$OUTPUT_DIR"
 echo "=========================================="
 
-python -u train.py --model-dir act_gelu --output-dir "$OUTPUT_DIR"
+python -u train.py --model-dir norm_post_ln --output-dir "$OUTPUT_DIR"
 
 echo "=========================================="
 echo "End Time: $(date)"

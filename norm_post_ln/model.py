@@ -22,7 +22,7 @@ VARIANT = "post_ln"   # one of: "pre_ln", "pre_rms", "post_ln"
 
 CONFIG = {
     "model": f"norm_{VARIANT}",
-    "bs": 8,
+    "bs": 64,
     "hidden_size": 768,
     "num_heads": 12,
     "num_blocks": 12,

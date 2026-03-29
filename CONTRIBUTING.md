@@ -45,7 +45,7 @@ All ablations compare against the baseline (sinusoidal PE, pre-LayerNorm, ReLU).
 **To set up the baseline checkpoint on your cluster:**
 
 1. Download `baseline.pt` from the Google Drive folder
-2. Place it in `baseline/runs/<jobid>/` alongside the other artifacts (which are tracked by git):
+2. Place it in `baseline/runs/457654/` alongside the other artifacts (which are tracked by git):
 
 You need the baseline checkpoint to run comparison analyses (e.g., plotting baseline loss curves alongside your variant, or computing baseline perplexity at different sequence lengths).
 
