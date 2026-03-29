@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=pe_rope
+#SBATCH --job-name=cs5242
 #SBATCH --partition=gpu --gres=gpu:h100-96:1
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
-#SBATCH --time=20:00:00
-#SBATCH --output=logs/pe_rope_%j.out
-#SBATCH --error=logs/pe_rope_%j.err
+#SBATCH --time=20:00
+#SBATCH --output=logs/%j.out
+#SBATCH --error=logs/%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=user@comp.nus.edu.sg
 
@@ -46,13 +46,22 @@ fi
 
 cd $HOME/Language_Model
 
-OUTPUT_DIR="pe_rope/runs/${SLURM_JOB_ID}"
+# Usage: sbatch eval_attn_rope.sh <weights> <model-py>
+# Example: sbatch eval_attn_rope.sh pe_rope/runs/525134/pe_rope.pt pe_rope/model.py
+WEIGHTS="${1}"
+MODEL_PY="${2}"
+
+OUTPUT_DIR="attn_eval_results/${SLURM_JOB_ID}"
 mkdir -p "$OUTPUT_DIR"
 
+echo "Weights: $WEIGHTS"
+echo "Model: $MODEL_PY"
 echo "Output directory: $(pwd)/$OUTPUT_DIR"
 echo "=========================================="
 
-python -u train.py --model-dir pe_rope --output-dir "$OUTPUT_DIR"
+python -u eval_attn.py --weights "$WEIGHTS" \
+                       --model-py "$MODEL_PY" \
+                       --output-dir "$OUTPUT_DIR"
 
 echo "=========================================="
 echo "End Time: $(date)"

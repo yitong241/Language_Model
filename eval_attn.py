@@ -118,6 +118,9 @@ def plot_attention_grid(mean_attn_scores, output_dir,
     plt.close(fig)
     print(f"Saved attention heatmap -> {out_path}")
 
+    del fig, axes
+    del all_log_norms
+
 
 # ── Evaluation ───────────────────────────────────────────────────────────────
 
