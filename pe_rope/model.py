@@ -14,7 +14,6 @@ import torch.nn.functional as F
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 
-'''
 CONFIG = {
     "model": "pe_rope",
     "bs": 64,
@@ -33,48 +32,6 @@ CONFIG = {
     "min_lr_fraction": 0.1,        # cosine decay to 10% of peak (GPT-3)
     "adam_beta1": 0.9,             # GPT-3 Appendix B
     "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
-}
-'''
-'''
-# Debug config
-CONFIG = {
-    "model": "pe_rope",
-    "bs": 64,
-    "hidden_size": 384,
-    "num_heads": 6,
-    "num_blocks": 6,
-    "dropout": 0.1,
-    "seq_length": 256,
-    "tokens_per_epoch": 500_000,
-    "num_epochs": 2,              # 85 * 50M = 4.25B tokens (~1.7x Chinchilla optimal for 125M)
-    "peak_lr": 6e-4,               # GPT-3 Table 2.1
-    "accumulation_steps": 8,        # effective batch = 64 * 1024 * 8 = 524K ≈ GPT-3's 0.5M
-    "weight_decay": 0.1,           # GPT-3 Appendix B
-    "grad_clip": 1.0,
-    "warmup_fraction": 0.075,      # ~750 steps, matches GPT-3's 375M token warmup
-    "min_lr_fraction": 0.1,        # cosine decay to 10% of peak (GPT-3)
-    "adam_beta1": 0.9,             # GPT-3 Appendix B
-    "adam_beta2": 0.95,            # GPT-3 Appendix B (not PyTorch default 0.999)
-}
-'''
-CONFIG = {
-    "model": "pe_rope",
-    "bs": 32,
-    "hidden_size": 512,
-    "num_heads": 8,
-    "num_blocks": 8,
-    "dropout": 0.1,
-    "seq_length": 512,
-    "tokens_per_epoch": 2_500_500,
-    "num_epochs": 15,               # 15 * 5M = 75M tokens
-    "peak_lr": 6e-4,
-    "accumulation_steps": 4,        # effective batch = 32 * 512 * 4 = 65K tokens
-    "weight_decay": 0.1,
-    "grad_clip": 1.0,
-    "warmup_fraction": 0.075,
-    "min_lr_fraction": 0.1,
-    "adam_beta1": 0.9,
-    "adam_beta2": 0.95,
 }
 
 # ── Positional encoding ─────────────────────────────────────────────────────────
