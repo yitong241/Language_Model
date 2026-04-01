@@ -11,7 +11,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils import generate_positional_encoding
 
 # ── Config ──────────────────────────────────────────────────────────────────────
 
@@ -38,10 +37,8 @@ CONFIG = {
 # ── Positional encoding ─────────────────────────────────────────────────────────
 
 def get_pos_encoding(seq_length, hidden_size, device):
-    """Return positional encoding tensor for this model variant.
-    Baseline uses sinusoidal PE. Override in ablation model.py for RoPE/ALiBi/etc.
-    """
-    return generate_positional_encoding(seq_length, hidden_size).to(device)
+    """Return position indices for learned positional embeddings."""
+    return torch.arange(seq_length, device=device)
 
 # ── Model ───────────────────────────────────────────────────────────────────────
 
@@ -103,9 +100,14 @@ class Transformer_decoder(nn.Module):
         self.final_norm = nn.LayerNorm(d)
 
     def forward(self, batch_seq, pos_enc):
-        H = batch_seq.transpose(1, 0)
-        pos_enc = pos_enc.unsqueeze(dim=0)
-        H = H + pos_enc
+        # H = batch_seq.transpose(1, 0)
+        # pos_enc = pos_enc.unsqueeze(dim=0)
+        # H = H + pos_enc
+        H = batch_seq
+        seq_len = H.size(1)
+        pos_enc = pos_enc[:seq_len, :]
+        pos_enc = pos_enc.unsqueeze(0)   # (1, seq, d)
+        H = H + pos_enc                  # (batch, seq, d)
         for TR_Block in self.TR_Blocks:
             H = TR_Block(H)
         H = self.final_norm(H)
@@ -137,17 +139,21 @@ class attention_net(nn.Module):
     def __init__(self, vocab_size, d, num_heads, num_blocks, seq_length, dropout):
         super().__init__()
         self.layer1 = nn.Embedding(vocab_size, d)
+        self.pos_embed = nn.Embedding(seq_length, d)
         self.layer2 = ANN(d, num_heads, num_blocks, seq_length, dropout)
         self.layer3 = nn.Linear(d, vocab_size, bias=False)
         self.layer3.weight = self.layer1.weight
         self.apply(self._init_weights)
+
         residual_std = 0.02 / math.sqrt(2 * num_blocks)
         for block in self.layer2.decoder.TR_Blocks:
             nn.init.normal_(block.MHA.WO.weight, mean=0, std=residual_std)
             nn.init.normal_(block.MLP[3].weight, mean=0, std=residual_std)
 
     def forward(self, word_seq, pos):
-        g_seq = self.layer1(word_seq)
+        g_seq = self.layer1(word_seq)   # (batch, seq_len, d)
+        pos = self.pos_embed(pos)       # (seq_len, d)
         h_seq = self.layer2(g_seq, pos)
         score_seq = self.layer3(h_seq)
         return score_seq
+    
