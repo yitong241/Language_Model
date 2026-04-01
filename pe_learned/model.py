@@ -55,6 +55,11 @@ class MultipleAttentionHead(nn.Module):
         self.num_heads = num_heads
         self.d_head = d_head
 
+        ############ For analysis only
+        self.capture_attn = False
+        self.attn_weights = None
+        #############
+
     def forward(self, H):
         batch, seq_len, _ = H.shape
         Q = self.WQ(H).reshape(batch, seq_len, self.num_heads, self.d_head)
@@ -69,6 +74,18 @@ class MultipleAttentionHead(nn.Module):
         )
         attn_out = attn_out.transpose(1, 2)
         attn_out = attn_out.reshape(batch, seq_len, self.d_head * self.num_heads)
+
+        ###### Analysis Code #####
+        if self.capture_attn:
+            attn_score = Q @ K.transpose(-2, -1) * self.d_head**-0.5 # [Batch size, Num Heads, seq_len, seq_len]
+            seq_len = Q.shape[2]
+            mask = torch.tril(torch.ones(seq_len, seq_len)).long().to(attn_score.device)
+            attn_score = attn_score.masked_fill(mask==0, value=float('-inf'))
+            attn_score = torch.softmax(attn_score, dim=-1)
+            self.attn_weights = attn_score
+        # attn_out = attn_score @ V
+        #####
+
         H = self.WO(attn_out)
         return H
 

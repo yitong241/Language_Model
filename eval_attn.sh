@@ -46,8 +46,8 @@ fi
 
 cd $HOME/Language_Model
 
-# Usage: sbatch eval_attn_rope.sh <weights> <model-py>
-# Example: sbatch eval_attn_rope.sh pe_rope/runs/525134/pe_rope.pt pe_rope/model.py
+# Usage: sbatch eval_attn.sh <weights> <model-py>
+# Example: sbatch eval_attn.sh pe_rope/runs/525134/pe_rope.pt pe_rope/model.py
 WEIGHTS="${1}"
 MODEL_PY="${2}"
 
