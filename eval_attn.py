@@ -78,13 +78,23 @@ def plot_attention_grid(mean_attn_scores, output_dir,
         figsize=(cell_size * len(col_heads), cell_size * len(row_blocks)),
         squeeze=False,
     )
-
+    
     all_log_norms = np.empty((num_blocks, num_heads, *mean_attn_scores.shape[2:]))
+    seq_len = mean_attn_scores.shape[-1]
+    
+    # Create a causal mask (True for the upper right triangle above the diagonal)
+    causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1)
+
     for b in range(num_blocks):
         for h in range(num_heads):
             tgt = mean_attn_scores[b, h]
+            
+            # 1. Calculate log with epsilon to prevent -inf on ALiBi underflows
             ln = torch.log(normalize_attention(tgt) + 1e-9)
-            ln[tgt == 0] = np.nan
+            
+            # 2. Mask ONLY the future tokens (upper right) with NaN
+            ln[causal_mask] = np.nan 
+            
             all_log_norms[b, h] = ln
 
     global_halfrange = float(np.nanmax(np.abs(all_log_norms)))
