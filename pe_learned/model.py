@@ -128,7 +128,7 @@ class Transformer_decoder(nn.Module):
         for TR_Block in self.TR_Blocks:
             H = TR_Block(H)
         H = self.final_norm(H)
-        H = H.permute(1, 0, 2)
+        # H = H.permute(1, 0, 2)
         return H
 
 
@@ -166,6 +166,19 @@ class attention_net(nn.Module):
         for block in self.layer2.decoder.TR_Blocks:
             nn.init.normal_(block.MHA.WO.weight, mean=0, std=residual_std)
             nn.init.normal_(block.MLP[3].weight, mean=0, std=residual_std)
+    
+    def get_decay_params(self):
+        """Return parameters that should have weight decay (exclude embeddings)."""
+        decay = set()
+        no_decay = set()
+        for name, param in self.named_parameters():
+            if 'pos_embed' in name or 'layer1' in name:
+                no_decay.add(param)
+            elif param.dim() >= 2:
+                decay.add(param)
+            else:
+                no_decay.add(param)
+        return decay, no_decay
 
     def forward(self, word_seq, pos):
         g_seq = self.layer1(word_seq)   # (batch, seq_len, d)
