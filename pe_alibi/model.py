@@ -104,6 +104,7 @@ class MultipleAttentionHead(nn.Module):
         K = self.WK(H).reshape(batch, seq_len, self.num_heads, self.d_head).transpose(1, 2)
         V = self.WV(H).reshape(batch, seq_len, self.num_heads, self.d_head).transpose(1, 2)
 
+        # Should include both causal masking and ALiBi additive bias
         attn_bias = self._build_alibi_bias(seq_len, H.device, Q.dtype)
 
         attn_out = F.scaled_dot_product_attention(
@@ -111,23 +112,31 @@ class MultipleAttentionHead(nn.Module):
             K,
             V,
             attn_mask=attn_bias,   # additive bias to logits
-            is_causal=False,       # causal mask already folded into attn_bias
+            is_causal=False,       # causal mask already included in attn_bias
             dropout_p=self.dropout_p if self.training else 0.0,
         )
 
-        attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, self.d_head * self.num_heads)
-
-        ###### Analysis Code #####
+        # Capture attention weights for analysis / visualization
         if self.capture_attn:
-            attn_score = Q @ K.transpose(-2, -1) * self.d_head**-0.5 # [Batch size, Num Heads, seq_len, seq_len]
-            seq_len = Q.shape[2]
-            mask = torch.tril(torch.ones(seq_len, seq_len)).long().to(attn_score.device)
-            attn_score = attn_score.masked_fill(mask==0, value=float('-inf'))
-            attn_score = torch.softmax(attn_score, dim=-1)
-            self.attn_weights = attn_score
-        # attn_out = attn_score @ V
-        #######
-        
+            with torch.no_grad():
+                # [batch, heads, seq, seq]
+                logits = torch.matmul(Q, K.transpose(-2, -1)) * (self.d_head ** -0.5)
+
+                # Must use the exact same bias as SDPA
+                logits = logits + attn_bias
+
+                seq_len = Q.shape[2]
+                mask = torch.tril(torch.ones(seq_len, seq_len)).long().to(logits.device)
+                logits = logits.masked_fill(mask==0, value=float('-inf'))
+
+
+                # Softmax over keys
+                attn_score = torch.softmax(logits.float(), dim=-1)
+
+                # Optional: move off GPU to save memory
+                self.attn_weights = attn_score.detach().cpu()
+
+        attn_out = attn_out.transpose(1, 2).reshape(batch, seq_len, self.d_head * self.num_heads)
         H = self.WO(attn_out)
         return H
 
