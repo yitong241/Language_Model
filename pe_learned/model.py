@@ -117,18 +117,15 @@ class Transformer_decoder(nn.Module):
         self.final_norm = nn.LayerNorm(d)
 
     def forward(self, batch_seq, pos_enc):
-        # H = batch_seq.transpose(1, 0)
-        # pos_enc = pos_enc.unsqueeze(dim=0)
-        # H = H + pos_enc
-        H = batch_seq
-        seq_len = H.size(1)
-        pos_enc = pos_enc[:seq_len, :]
-        pos_enc = pos_enc.unsqueeze(0)   # (1, seq, d)
-        H = H + pos_enc                  # (batch, seq, d)
+        H = batch_seq.transpose(0, 1)    # (seq_length, batch_size, d) → (batch_size, seq_length, d)
+        seq_len = H.size(1)              # correctly gets seq_length
+        pos_enc = pos_enc[:seq_len, :]   # (seq_len, d)
+        pos_enc = pos_enc.unsqueeze(0)   # (1, seq_len, d)
+        H = H + pos_enc                  # (batch_size, seq_len, d)
         for TR_Block in self.TR_Blocks:
             H = TR_Block(H)
         H = self.final_norm(H)
-        # H = H.permute(1, 0, 2)
+        H = H.permute(1, 0, 2)          # (batch_size, seq_len, d) → (seq_len, batch_size, d)
         return H
 
 
