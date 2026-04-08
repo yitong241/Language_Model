@@ -97,6 +97,7 @@ def plot_attention_grid(mean_attn_scores, output_dir,
             
             all_log_norms[b, h] = ln
 
+    del causal_mask
     global_halfrange = float(np.nanmax(np.abs(all_log_norms)))
 
     for r, block_idx in enumerate(row_blocks):
@@ -152,11 +153,14 @@ def eval_on_test_set_pe(net, pos, eval_data, bs, seq_length, vocab_size, device,
             loss   = criterion(scores, label.view(bs * seq_length))
 
         for i, block in enumerate(net.layer2.decoder.TR_Blocks):
-            attn_weights = block.MHA.attn_weights.float()
+            attn_weights = block.MHA.attn_weights.float().cpu()
             if attn_sum[i] is None:
-                attn_sum[i] = attn_weights.sum(axis=0).cpu()
+                attn_sum[i] = attn_weights.sum(axis=0)
             else:
-                attn_sum[i] += attn_weights.sum(axis=0).cpu()
+                attn_sum[i] += attn_weights.sum(axis=0)
+        
+        del data
+        del label
 
         running_loss += loss.item()
         num_batches  += 1
